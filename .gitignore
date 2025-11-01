@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# Grok cache
+.grok/
+
+# Backups
+Backups/

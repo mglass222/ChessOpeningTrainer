@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Opening Trainer</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+</head>
+<body>
+    <h1>Chess Opening Trainer</h1>
+    <div id="app">
+        <div id="opening-builder">
+            <h2>Create Opening Line</h2>
+            <p>Move pieces on the board to create your opening. The program will automatically detect and name known openings! Tip: Save a main opening, then continue playing to add variations.</p>
+            <div id="board"></div>
+            <div id="move-history"></div>
+
+            <div class="save-section">
+                <label>
+                    <input type="radio" name="save-type" value="main" checked>
+                    Save Opening
+                </label>
+                <label>
+                    <input type="radio" name="save-type" value="variation">
+                    Save Variation
+                </label>
+            </div>
+
+            <input type="text" id="opening-name" placeholder="Opening Name (auto-detected or enter custom name)">
+
+            <div id="variation-section" style="display: none;">
+                <input type="text" id="variation-name" placeholder="Variation Name (e.g., Morphy Defense, Exchange Variation)">
+                <select id="parent-opening">
+                    <option value="">Select Parent Opening</option>
+                </select>
+            </div>
+
+            <textarea id="opening-moves" placeholder="Moves will appear here automatically as you play them on the board" readonly></textarea>
+            <button id="save-opening">Save Opening</button>
+            <button id="reset-board">Reset Board</button>
+        </div>
+        <div id="opening-list">
+            <h2>Your Openings</h2>
+            <p>Manage your saved chess openings below:</p>
+            <ul id="openings"></ul>
+        </div>
+    </div>
+    <!-- Custom Modal Dialog -->
+    <div id="custom-modal-overlay" class="modal-overlay">
+        <div id="custom-modal" class="modal-dialog">
+            <div class="modal-content">
+                <p id="modal-message"></p>
+            </div>
+            <div class="modal-buttons">
+                <button id="modal-confirm-btn" class="modal-btn modal-btn-primary">OK</button>
+                <button id="modal-cancel-btn" class="modal-btn modal-btn-secondary" style="display: none;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

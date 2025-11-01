@@ -1,0 +1,373 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+    background-color: #f5f5f5;
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+#opening-builder, #opening-list {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    width: 640px;
+    max-width: calc(90vw + 40px);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#opening-builder {
+    text-align: center;
+}
+
+#opening-builder input[type="text"],
+#opening-builder textarea,
+#opening-builder button {
+    width: 600px;
+    max-width: 90vw;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+    display: block;
+    box-sizing: border-box;
+}
+
+#opening-builder button {
+    text-align: center;
+}
+
+h2 {
+    margin-top: 0;
+    color: #555;
+}
+
+p {
+    color: #666;
+    margin: 10px 0;
+    font-size: 14px;
+}
+
+input[type="text"], textarea, select {
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+textarea {
+    min-height: 80px;
+    font-family: monospace;
+}
+
+textarea[readonly] {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
+
+button {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 5px 5px 5px 0;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+#board {
+    width: 600px;
+    max-width: 90vw;
+    margin: 20px auto;
+}
+
+#move-history {
+    margin: 20px auto;
+    padding: 15px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    min-height: 40px;
+    font-family: monospace;
+    width: 600px;
+    max-width: 90vw;
+    text-align: left;
+    line-height: 1.8;
+}
+
+.move-number {
+    color: #666;
+    font-weight: bold;
+    margin-right: 3px;
+}
+
+.history-move {
+    padding: 2px 4px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.history-move:hover {
+    background-color: #e0e0e0;
+}
+
+.current-move {
+    padding: 2px 6px;
+    background-color: #2196F3;
+    color: white;
+    border-radius: 3px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+
+#openings {
+    list-style: none;
+    padding: 0;
+}
+
+/* Main opening items */
+.main-opening {
+    margin: 10px 0;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.opening-header, .variation-header {
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #f9f9f9;
+}
+
+.variation-header {
+    padding: 10px;
+    background-color: #fff;
+}
+
+.expand-icon {
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    width: 20px;
+    display: inline-block;
+    transition: transform 0.2s;
+    color: #666;
+}
+
+.expand-icon:hover {
+    color: #2196F3;
+}
+
+.expand-spacer {
+    width: 20px;
+    display: inline-block;
+}
+
+.opening-name {
+    flex-grow: 1;
+    font-weight: 500;
+    color: #333;
+}
+
+.button-container {
+    display: flex;
+    gap: 5px;
+}
+
+.opening-header button,
+.variation-header button {
+    padding: 5px 15px;
+    margin: 0;
+    font-size: 13px;
+}
+
+/* Variations list */
+.variations-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    background-color: #fff;
+    border-top: 1px solid #ddd;
+}
+
+.variation-item {
+    border-bottom: 1px solid #eee;
+}
+
+.variation-item .variation-header {
+    padding-left: 35px;
+    position: relative;
+}
+
+.variation-item .variation-header::before {
+    content: '├─';
+    position: absolute;
+    left: 15px;
+    color: #999;
+}
+
+.variations-list > .variation-item:last-child > .variation-header::before {
+    content: '└─';
+}
+
+/* Nested variations get additional left padding */
+.variation-item .variation-item .variation-header {
+    padding-left: 55px;
+}
+
+.variation-item .variation-item .variation-item .variation-header {
+    padding-left: 75px;
+}
+
+.variation-name {
+    flex-grow: 1;
+    color: #555;
+    font-size: 14px;
+}
+
+.delete-btn {
+    background-color: #f44336 !important;
+}
+
+.delete-btn:hover {
+    background-color: #da190b !important;
+}
+
+/* Save section styling */
+.save-section {
+    margin: 15px auto;
+    padding: 10px;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    width: 600px;
+    max-width: 90vw;
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+}
+
+.save-section label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#variation-section {
+    width: 600px;
+    max-width: 90vw;
+    margin: 10px auto;
+}
+
+#variation-section input,
+#variation-section select {
+    margin: 5px 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Custom Modal Styles */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-overlay.show {
+    display: flex;
+}
+
+.modal-dialog {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    max-width: 500px;
+    width: 90%;
+    padding: 25px;
+    animation: modalFadeIn 0.2s ease-out;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-content {
+    margin-bottom: 20px;
+}
+
+.modal-content p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #333;
+    white-space: pre-line;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.modal-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.modal-btn-primary {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.modal-btn-primary:hover {
+    background-color: #45a049;
+}
+
+.modal-btn-secondary {
+    background-color: #e0e0e0;
+    color: #333;
+}
+
+.modal-btn-secondary:hover {
+    background-color: #d0d0d0;
+}
