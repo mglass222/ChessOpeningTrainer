@@ -10,7 +10,7 @@
 <body>
     <h1>Chess Opening Trainer</h1>
     <div id="app">
-        <div id="opening-builder">
+        <div id="opening-builder" class="resizable-section">
             <h2>Create Opening</h2>
             <p>Move pieces on the board to create your opening. The program will automatically detect and name known openings! Tip: Save a main opening, then continue playing to add variations.</p>
             <div id="board"></div>
@@ -25,6 +25,10 @@
                     <input type="radio" name="save-type" value="variation">
                     Save Variation
                 </label>
+                <label>
+                    <input type="radio" name="save-type" value="update" disabled>
+                    Update Variation
+                </label>
             </div>
 
             <input type="text" id="opening-name" placeholder="Opening Name (auto-detected or enter custom name)">
@@ -37,12 +41,16 @@
             </div>
 
             <textarea id="opening-moves" placeholder="Moves will appear here automatically as you play them on the board" readonly></textarea>
-            <button id="save-opening">Save Opening</button>
+            <div class="button-group">
+                <button id="save-opening">Save Opening</button>
+                <button id="quick-add" style="display: none;">Quick Add Sub-Variation</button>
+            </div>
             <button id="reset-board">Reset Board</button>
         </div>
-        <div id="opening-list">
-            <h2>Your Openings</h2>
-            <p>Manage your saved chess openings below:</p>
+        <div id="resizer"></div>
+        <div id="opening-list" class="resizable-section">
+            <h2>Opening Lines</h2>
+            <p>Select an opening to practice or manage your saved lines:</p>
             <ul id="openings"></ul>
         </div>
     </div>

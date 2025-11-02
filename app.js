@@ -69,6 +69,10 @@ function migrateOpenings() {
         if (!obj.hasOwnProperty('variations')) {
             obj.variations = [];
         }
+        // Add isFromDatabase flag if it doesn't exist (default to false for old user entries)
+        if (!obj.hasOwnProperty('isFromDatabase')) {
+            obj.isFromDatabase = false;
+        }
         // Recursively process existing variations
         if (obj.variations && obj.variations.length > 0) {
             obj.variations = obj.variations.map(v => {
@@ -88,11 +92,135 @@ function migrateOpenings() {
     return openings;
 }
 
-let openings = migrateOpenings();
+// Pre-populate openings from theory database
+// IMPORTANT: When making changes that require re-population, increment CURRENT_VERSION
+function prePopulateOpenings() {
+    const CURRENT_VERSION = 5; // Increment this when structure changes
+    const storedVersion = parseInt(localStorage.getItem('openings_version')) || 0;
+
+    // Clean up old flag-based system
+    localStorage.removeItem('openings_prepopulated');
+
+    // If we're already at the current version, just return existing data
+    if (storedVersion >= CURRENT_VERSION) {
+        return JSON.parse(localStorage.getItem('openings')) || [];
+    }
+
+    // If there are existing user openings, we need to preserve them
+    let existingUserOpenings = [];
+    if (storedVersion > 0) {
+        const existing = JSON.parse(localStorage.getItem('openings')) || [];
+        // Extract user-added openings (not from database)
+        existingUserOpenings = existing.filter(o => o.isFromDatabase !== true);
+    }
+
+    // Convert openingTheory to array format and organize hierarchically
+    const theoryEntries = Object.entries(openingTheory).map(([movesStr, name]) => {
+        return {
+            moves: movesStr.split(' '),
+            name: name,
+            moveCount: movesStr.split(' ').length
+        };
+    });
+
+    // Sort by move count to process shorter sequences first
+    theoryEntries.sort((a, b) => a.moveCount - b.moveCount);
+
+    // Build hierarchical structure
+    const mainOpenings = [];
+
+    for (const entry of theoryEntries) {
+        const { moves, name } = entry;
+
+        // Try to find a parent opening/variation
+        let parent = null;
+        let parentPath = null;
+
+        // Search for the longest matching parent
+        function findParent(openingsList, currentPath = []) {
+            for (let i = 0; i < openingsList.length; i++) {
+                const opening = openingsList[i];
+
+                // Check if this opening is a prefix of our moves
+                if (moves.length > opening.moves.length) {
+                    let isPrefix = true;
+                    for (let j = 0; j < opening.moves.length; j++) {
+                        if (opening.moves[j] !== moves[j]) {
+                            isPrefix = false;
+                            break;
+                        }
+                    }
+
+                    if (isPrefix) {
+                        // This is a potential parent
+                        if (!parent || opening.moves.length > parent.moves.length) {
+                            parent = opening;
+                            parentPath = [...currentPath, i];
+                        }
+
+                        // Search in variations recursively
+                        if (opening.variations && opening.variations.length > 0) {
+                            findParent(opening.variations, [...currentPath, i]);
+                        }
+                    }
+                }
+            }
+        }
+
+        findParent(mainOpenings);
+
+        // Create the opening object (mark as from database)
+        const openingObj = {
+            name: name,
+            moves: moves,
+            variations: [],
+            isFromDatabase: true
+        };
+
+        // Check if this exact opening already exists to prevent duplicates
+        function openingExists(list, moves) {
+            return list.some(item => {
+                if (item.moves.length !== moves.length) return false;
+                return item.moves.every((move, idx) => move === moves[idx]);
+            });
+        }
+
+        // Add as variation or main opening (only if it doesn't already exist)
+        if (parent) {
+            // Skip if this opening has the same name as the parent (just extends the parent's moves)
+            if (parent.name === name) {
+                continue;
+            }
+
+            if (!parent.variations) {
+                parent.variations = [];
+            }
+            if (!openingExists(parent.variations, moves)) {
+                parent.variations.push(openingObj);
+            }
+        } else {
+            if (!openingExists(mainOpenings, moves)) {
+                mainOpenings.push(openingObj);
+            }
+        }
+    }
+
+    // Merge user-added openings back in
+    const allOpenings = [...mainOpenings, ...existingUserOpenings];
+
+    // Save to localStorage with version number
+    localStorage.setItem('openings', JSON.stringify(allOpenings));
+    localStorage.setItem('openings_version', CURRENT_VERSION.toString());
+
+    return allOpenings;
+}
+
+let openings = [];
 let game = null;
 let board = null;
 let moveHistory = []; // Full move history for navigation
 let currentMoveIndex = -1; // Current position in move history (-1 = at start)
+let loadedOpening = null; // Track the currently loaded opening/variation for updates
 
 // Chess opening theory database
 const openingTheory = {
@@ -100,387 +228,175 @@ const openingTheory = {
     'e4': 'King\'s Pawn Opening',
     'e4 e5': 'Open Game',
     'e4 e5 Nf3': 'King\'s Knight Opening',
-    'e4 e5 Nf3 Nc6': 'King\'s Knight Opening',
     'e4 e5 Nf3 Nc6 Bb5': 'Ruy Lopez',
     'e4 e5 Nf3 Nc6 Bb5 a6': 'Ruy Lopez: Morphy Defense',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4': 'Ruy Lopez: Morphy Defense',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6': 'Ruy Lopez: Morphy Defense',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O': 'Ruy Lopez: Closed',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 d6': 'Ruy Lopez: Closed, Chigorin Defense',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3': 'Ruy Lopez: Closed, Chigorin Defense',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d6': 'Ruy Lopez: Closed, Chigorin Defense',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4': 'Ruy Lopez: Open Variation',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4': 'Ruy Lopez: Open Variation',
     'e4 e5 Nf3 Nc6 Bb5 a6 Bxc6': 'Ruy Lopez: Exchange Variation',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Bxc6 dxc6': 'Ruy Lopez: Exchange Variation',
     'e4 e5 Nf3 Nc6 Bb5 Nf6': 'Ruy Lopez: Berlin Defense',
-    'e4 e5 Nf3 Nc6 Bb5 Nf6 O-O': 'Ruy Lopez: Berlin Defense',
-    'e4 e5 Nf3 Nc6 Bb5 Nf6 O-O Nxe4': 'Ruy Lopez: Berlin Defense',
     'e4 e5 Nf3 Nc6 Bb5 Nf6 d3': 'Ruy Lopez: Berlin Defense, Closed Variation',
     'e4 e5 Nf3 Nc6 Bb5 Bc5': 'Ruy Lopez: Classical Variation',
     'e4 e5 Nf3 Nc6 Bb5 Nd4': 'Ruy Lopez: Bird Variation',
     'e4 e5 Nf3 Nc6 Bb5 f5': 'Ruy Lopez: Schliemann Defense',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d5': 'Ruy Lopez: Marshall Attack',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d5 exd5': 'Ruy Lopez: Marshall Attack',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d5 exd5 Nxd5': 'Ruy Lopez: Marshall Attack',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d5 exd5 Nxd5 Nxe5': 'Ruy Lopez: Marshall Attack',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d6 h3': 'Ruy Lopez: Closed, Breyer Defense',
-    'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d6 h3 Nb8': 'Ruy Lopez: Closed, Breyer Defense',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d6 h3 Na5': 'Ruy Lopez: Closed, Chigorin Variation',
     'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 O-O c3 d6 h3 Bb7': 'Ruy Lopez: Closed, Zaitsev Variation',
     'e4 e5 Nf3 Nc6 Bc4': 'Italian Game',
     'e4 e5 Nf3 Nc6 Bc4 Bc5': 'Italian Game: Giuoco Piano',
-    'e4 e5 Nf3 Nc6 Bc4 Bc5 c3': 'Italian Game: Giuoco Piano',
-    'e4 e5 Nf3 Nc6 Bc4 Bc5 c3 Nf6': 'Italian Game: Giuoco Piano',
     'e4 e5 Nf3 Nc6 Bc4 Bc5 c3 Nf6 d4': 'Italian Game: Giuoco Piano, Main Line',
     'e4 e5 Nf3 Nc6 Bc4 Bc5 c3 Nf6 d3': 'Italian Game: Giuoco Pianissimo',
     'e4 e5 Nf3 Nc6 Bc4 Bc5 b4': 'Italian Game: Evans Gambit',
     'e4 e5 Nf3 Nc6 Bc4 Bc5 b4 Bxb4': 'Italian Game: Evans Gambit Accepted',
     'e4 e5 Nf3 Nc6 Bc4 Nf6': 'Italian Game: Two Knights Defense',
     'e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5': 'Italian Game: Two Knights Defense, Fried Liver Attack',
-    'e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5': 'Italian Game: Two Knights Defense, Fried Liver Attack',
-    'e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5': 'Italian Game: Two Knights Defense, Fried Liver Attack',
-    'e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5 Nxd5': 'Italian Game: Two Knights Defense, Fried Liver Attack',
     'e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5 Na5': 'Italian Game: Two Knights Defense, Polerio Defense',
     'e4 e5 Nf3 Nc6 Bc4 Nf6 d4': 'Italian Game: Scotch Gambit',
-    'e4 e5 Nf3 Nc6 Bc4 Nf6 d3': 'Italian Game: Giuoco Pianissimo',
     'e4 e5 Nf3 Nc6 d4': 'Scotch Game',
-    'e4 e5 Nf3 Nc6 d4 exd4': 'Scotch Game',
-    'e4 e5 Nf3 Nc6 d4 exd4 Nxd4': 'Scotch Game',
-    'e4 e5 Nf3 Nc6 d4 exd4 Nxd4 Nf6': 'Scotch Game',
     'e4 e5 Nf3 Nc6 d4 exd4 Nxd4 Bc5': 'Scotch Game: Classical Variation',
     'e4 e5 Nf3 Nc6 d4 exd4 Nxd4 Qh4': 'Scotch Game: Steinitz Variation',
     'e4 e5 Nf3 Nc6 d4 exd4 c3': 'Scotch Game: Göring Gambit',
     'e4 e5 Nf3 Nc6 d4 exd4 c3 dxc3': 'Scotch Game: Göring Gambit Accepted',
     'e4 e5 Nf3 Nc6 d4 exd4 c3 d5': 'Scotch Game: Göring Gambit Declined',
     'e4 e5 Nf3 Nc6 d4 exd4 Bc4': 'Scotch Gambit',
-    'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Nf6': 'Scotch Gambit',
     'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Bc5': 'Scotch Gambit: Classical Variation',
     'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Bb4+': 'Scotch Gambit: Dubois-Réti Defense',
-    'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Bb4+ c3': 'Scotch Gambit: Dubois-Réti Defense',
-    'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Bb4+ c3 dxc3': 'Scotch Gambit: Dubois-Réti Defense',
     'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Nf6 e5': 'Scotch Gambit: Advance Variation',
-    'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Nf6 O-O': 'Scotch Gambit',
-    'e4 e5 Nf3 Nc6 d4 exd4 Bc4 Nf6 O-O Nxe4': 'Scotch Gambit',
     'e4 e5 Nf3 Nf6': 'Petrov\'s Defense',
-    'e4 e5 Nf3 Nf6 Nxe5': 'Petrov\'s Defense',
-    'e4 e5 Nf3 Nf6 Nxe5 d6': 'Petrov\'s Defense',
-    'e4 e5 Nf3 Nf6 Nxe5 d6 Nf3': 'Petrov\'s Defense',
-    'e4 e5 Nf3 Nf6 Nxe5 d6 Nf3 Nxe4': 'Petrov\'s Defense',
+    'e4 e5 Nf3 Nf6 Nxe5 d6 Nf3 Nxe4': 'Petrov\'s Defense, Main Line',
     'e4 e5 Nf3 d6': 'Philidor Defense',
-    'e4 e5 Nf3 d6 d4': 'Philidor Defense',
-    'e4 e5 Nf3 d6 d4 exd4': 'Philidor Defense',
     'e4 e5 f4': 'King\'s Gambit',
     'e4 e5 f4 exf4': 'King\'s Gambit Accepted',
     'e4 e5 f4 d5': 'King\'s Gambit Declined: Falkbeer Counter Gambit',
     'e4 e5 f4 Bc5': 'King\'s Gambit Declined: Classical Variation',
     'e4 e5 Nc3': 'Vienna Game',
-    'e4 e5 Nc3 Nf6': 'Vienna Game',
     'e4 e5 Nc3 Nf6 f4': 'Vienna Gambit',
     'e4 e5 Nc3 Nf6 f4 exf4': 'Vienna Gambit Accepted',
     'e4 e5 Nc3 Nf6 f4 d5': 'Vienna Gambit Declined',
-    'e4 e5 Nc3 Nf6 f4 d5 fxe5': 'Vienna Gambit Declined',
-    'e4 e5 Nc3 Nf6 f4 d5 fxe5 Nxe4': 'Vienna Gambit Declined',
-    'e4 e5 Nc3 Nf6 f4 exf4 e5': 'Vienna Gambit Accepted',
     'e4 e5 Nc3 Nf6 f4 exf4 e5 Ng4': 'Vienna Gambit: Steinitz Gambit',
-    'e4 e5 Nc3 Nf6 f4 exf4 Nf3': 'Vienna Gambit: Hamppe-Allgaier Gambit',
-    'e4 e5 Nc3 Nf6 Bc4': 'Vienna Game',
     'e4 e5 Nc3 Nf6 Bc4 Nxe4': 'Vienna Game: Frankenstein-Dracula Variation',
-    'e4 e5 Nc3 Nf6 Bc4 Nc6': 'Vienna Game',
-    'e4 e5 Nc3 Nc6': 'Vienna Game',
-    'e4 e5 Nc3 Nc6 f4': 'Vienna Gambit',
-    'e4 e5 Nc3 Nc6 f4 exf4': 'Vienna Gambit Accepted',
-    'e4 e5 Nc3 Nc6 f4 exf4 Nf3': 'Vienna Gambit Accepted',
-    'e4 e5 Nc3 Nc6 f4 exf4 Nf3 g5': 'Vienna Gambit Accepted',
-    'e4 e5 Nc3 Nc6 Bc4': 'Vienna Game',
-    'e4 e5 Nc3 Nc6 Bc4 Nf6': 'Vienna Game',
-    'e4 e5 Nc3 Nc6 Bc4 Bc5': 'Vienna Game',
     'e4 e5 Nc3 Nc6 g3': 'Vienna Game: Mieses Variation',
-    'e4 e5 Nc3 Nc6 Nf3': 'Vienna Game',
-    'e4 e5 Nc3 Bc5': 'Vienna Game',
 
     // Sicilian Defense
     'e4 c5': 'Sicilian Defense',
-    'e4 c5 Nf3': 'Sicilian Defense',
-    'e4 c5 Nf3 d6': 'Sicilian Defense',
-    'e4 c5 Nf3 d6 d4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 d6 d4 cxd4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 d6 d4 cxd4 Nxd4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3': 'Sicilian Defense: Classical',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6': 'Sicilian Defense: Najdorf Variation',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Bg5': 'Sicilian Defense: Najdorf, Main Line',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Be3': 'Sicilian Defense: Najdorf, English Attack',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 f3': 'Sicilian Defense: Najdorf, English Attack',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Be2': 'Sicilian Defense: Najdorf, Opocensky Variation',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6': 'Sicilian Defense: Dragon Variation',
-    'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be3': 'Sicilian Defense: Dragon, Classical',
-    'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be3 Bg7': 'Sicilian Defense: Dragon, Classical',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be3 Bg7 f3': 'Sicilian Defense: Dragon, Yugoslav Attack',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 e6': 'Sicilian Defense: Scheveningen Variation',
     'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 Nc6': 'Sicilian Defense: Classical Variation',
-    'e4 c5 Nf3 Nc6': 'Sicilian Defense',
-    'e4 c5 Nf3 Nc6 d4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 Nc6 d4 cxd4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4': 'Sicilian Defense: Open',
     'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 Nf6': 'Sicilian Defense: Old Sicilian',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 Nf6 Nc3': 'Sicilian Defense: Old Sicilian',
     'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 Nf6 Nc3 e5': 'Sicilian Defense: Sveshnikov Variation',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 Nf6 Nc3 e5 Ndb5': 'Sicilian Defense: Sveshnikov Variation',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 Nf6 Nc3 e5 Ndb5 d6': 'Sicilian Defense: Sveshnikov Variation',
     'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 g6': 'Sicilian Defense: Accelerated Dragon',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 g6 Nc3': 'Sicilian Defense: Accelerated Dragon',
-    'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 g6 Nc3 Bg7': 'Sicilian Defense: Accelerated Dragon',
     'e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 g6 c4': 'Sicilian Defense: Accelerated Dragon, Maroczy Bind',
-    'e4 c5 Nf3 e6': 'Sicilian Defense',
-    'e4 c5 Nf3 e6 d4': 'Sicilian Defense: Open',
-    'e4 c5 Nf3 e6 d4 cxd4': 'Sicilian Defense: Open',
     'e4 c5 Nf3 e6 d4 cxd4 Nxd4': 'Sicilian Defense: Taimanov Variation',
-    'e4 c5 Nf3 e6 d4 cxd4 Nxd4 Nc6': 'Sicilian Defense: Taimanov Variation',
     'e4 c5 Nf3 e6 d4 cxd4 Nxd4 a6': 'Sicilian Defense: Kan Variation',
     'e4 c5 c3': 'Sicilian Defense: Alapin Variation',
-    'e4 c5 c3 Nf6': 'Sicilian Defense: Alapin Variation',
-    'e4 c5 c3 d5': 'Sicilian Defense: Alapin Variation',
     'e4 c5 Nc3': 'Sicilian Defense: Closed Variation',
-    'e4 c5 Nc3 Nc6': 'Sicilian Defense: Closed Variation',
     'e4 c5 Nc3 Nc6 g3': 'Sicilian Defense: Closed Variation, Fianchetto',
 
     // French Defense
     'e4 e6': 'French Defense',
-    'e4 e6 d4': 'French Defense',
-    'e4 e6 d4 d5': 'French Defense',
-    'e4 e6 d4 d5 Nc3': 'French Defense: Classical',
     'e4 e6 d4 d5 Nc3 Nf6': 'French Defense: Classical',
     'e4 e6 d4 d5 Nc3 Bb4': 'French Defense: Winawer Variation',
-    'e4 e6 d4 d5 Nc3 Bb4 e5': 'French Defense: Winawer Variation',
-    'e4 e6 d4 d5 Nc3 Bb4 e5 c5': 'French Defense: Winawer Variation',
-    'e4 e6 d4 d5 Nc3 Bb4 e5 c5 a3': 'French Defense: Winawer Variation',
     'e4 e6 d4 d5 Nc3 dxe4': 'French Defense: Rubinstein Variation',
     'e4 e6 d4 d5 Nd2': 'French Defense: Tarrasch Variation',
-    'e4 e6 d4 d5 Nd2 Nf6': 'French Defense: Tarrasch Variation',
-    'e4 e6 d4 d5 Nd2 c5': 'French Defense: Tarrasch Variation',
     'e4 e6 d4 d5 exd5': 'French Defense: Exchange Variation',
-    'e4 e6 d4 d5 exd5 exd5': 'French Defense: Exchange Variation',
     'e4 e6 d4 d5 e5': 'French Defense: Advance Variation',
-    'e4 e6 d4 d5 e5 c5': 'French Defense: Advance Variation',
-    'e4 e6 d4 d5 e5 c5 c3': 'French Defense: Advance Variation',
-    'e4 e6 d4 d5 e5 c5 Nf3': 'French Defense: Advance Variation',
 
     // Caro-Kann Defense
     'e4 c6': 'Caro-Kann Defense',
-    'e4 c6 d4': 'Caro-Kann Defense',
-    'e4 c6 d4 d5': 'Caro-Kann Defense',
-    'e4 c6 d4 d5 Nc3': 'Caro-Kann Defense: Classical',
-    'e4 c6 d4 d5 Nc3 dxe4': 'Caro-Kann Defense: Classical',
-    'e4 c6 d4 d5 Nc3 dxe4 Nxe4': 'Caro-Kann Defense: Classical',
     'e4 c6 d4 d5 Nc3 dxe4 Nxe4 Bf5': 'Caro-Kann Defense: Classical Variation',
     'e4 c6 d4 d5 Nc3 dxe4 Nxe4 Nf6': 'Caro-Kann Defense: Classical, Main Line',
     'e4 c6 d4 d5 exd5': 'Caro-Kann Defense: Exchange Variation',
-    'e4 c6 d4 d5 exd5 cxd5': 'Caro-Kann Defense: Exchange Variation',
     'e4 c6 d4 d5 e5': 'Caro-Kann Defense: Advance Variation',
-    'e4 c6 d4 d5 e5 Bf5': 'Caro-Kann Defense: Advance Variation',
-    'e4 c6 d4 d5 e5 c5': 'Caro-Kann Defense: Advance Variation',
     'e4 c6 d4 d5 Nd2': 'Caro-Kann Defense: Two Knights Variation',
     'e4 c6 Nc3': 'Caro-Kann Defense: Two Knights Attack',
 
     // Pirc Defense
     'e4 d6': 'Pirc Defense',
-    'e4 d6 d4 Nf6': 'Pirc Defense',
-    'e4 d6 d4 Nf6 Nc3': 'Pirc Defense',
-    'e4 d6 d4 Nf6 Nc3 g6': 'Pirc Defense',
+    'e4 d6 d4 Nf6 Nc3 g6': 'Pirc Defense: Main Line',
 
     // Alekhine's Defense
     'e4 Nf6': 'Alekhine\'s Defense',
-    'e4 Nf6 e5': 'Alekhine\'s Defense',
 
     // Queen's Pawn Openings
     'd4': 'Queen\'s Pawn Opening',
     'd4 d5': 'Queen\'s Pawn Game',
     'd4 d5 c4': 'Queen\'s Gambit',
     'd4 d5 c4 e6': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 e6 Nc3': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 e6 Nc3 Nf6': 'Queen\'s Gambit Declined',
     'd4 d5 c4 e6 Nc3 Nf6 Bg5': 'Queen\'s Gambit Declined: Orthodox Defense',
-    'd4 d5 c4 e6 Nc3 Nf6 Bg5 Be7': 'Queen\'s Gambit Declined: Orthodox Defense',
-    'd4 d5 c4 e6 Nc3 Nf6 Nf3': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 e6 Nc3 Nf6 Nf3 Be7': 'Queen\'s Gambit Declined',
     'd4 d5 c4 e6 Nc3 Be7': 'Queen\'s Gambit Declined: Alatortsev Variation',
-    'd4 d5 c4 e6 Nf3': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 e6 Nf3 Nf6': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 e6 Nf3 Nf6 Nc3': 'Queen\'s Gambit Declined',
-    'd4 d5 c4 c6': 'Queen\'s Gambit Declined: Slav Defense',
-    'd4 d5 c4 c6 Nf3': 'Slav Defense',
-    'd4 d5 c4 c6 Nf3 Nf6': 'Slav Defense',
-    'd4 d5 c4 c6 Nf3 Nf6 Nc3': 'Slav Defense: Main Line',
+    'd4 d5 c4 c6': 'Slav Defense',
     'd4 d5 c4 c6 Nf3 Nf6 Nc3 dxc4': 'Slav Defense: Main Line',
-    'd4 d5 c4 c6 Nc3': 'Slav Defense',
-    'd4 d5 c4 c6 Nc3 Nf6': 'Slav Defense',
-    'd4 d5 c4 c6 Nc3 Nf6 Nf3': 'Slav Defense',
-    'd4 d5 c4 c6 Nc3 Nf6 e3': 'Slav Defense: Meran Variation',
     'd4 d5 c4 c6 Nc3 Nf6 e3 e6': 'Slav Defense: Meran Variation',
     'd4 d5 c4 c6 Nc3 e6': 'Semi-Slav Defense',
-    'd4 d5 c4 c6 Nf3 Nf6 Nc3 e6': 'Semi-Slav Defense',
     'd4 d5 c4 c6 Nf3 Nf6 Nc3 e6 e3': 'Semi-Slav Defense: Meran Variation',
     'd4 d5 c4 c6 Nf3 Nf6 Nc3 e6 Bg5': 'Semi-Slav Defense: Botvinnik Variation',
     'd4 d5 c4 dxc4': 'Queen\'s Gambit Accepted',
-    'd4 d5 c4 dxc4 Nf3': 'Queen\'s Gambit Accepted',
-    'd4 d5 c4 dxc4 Nf3 Nf6': 'Queen\'s Gambit Accepted',
     'd4 d5 c4 dxc4 e4': 'Queen\'s Gambit Accepted: Showalter Variation',
-    'd4 d5 Nf3': 'Queen\'s Pawn Game',
-    'd4 d5 Nf3 Nf6': 'Queen\'s Pawn Game',
-    'd4 d5 Nf3 Nf6 c4': 'Queen\'s Gambit',
-    'd4 d5 Nf3 Nf6 c4 e6': 'Queen\'s Gambit Declined',
-    'd4 d5 Nf3 Nf6 c4 c6': 'Slav Defense',
     'd4 d5 Bf4': 'London System',
-    'd4 d5 Bf4 Nf6': 'London System',
-    'd4 d5 Bf4 c5': 'London System',
 
     // Indian Defenses
     'd4 Nf6': 'Indian Defense',
-    'd4 Nf6 c4': 'Indian Defense',
-    'd4 Nf6 c4 e6': 'Indian Defense',
-    'd4 Nf6 c4 e6 Nc3': 'Indian Defense',
     'd4 Nf6 c4 e6 Nc3 Bb4': 'Nimzo-Indian Defense',
     'd4 Nf6 c4 e6 Nc3 Bb4 Qc2': 'Nimzo-Indian Defense: Classical Variation',
     'd4 Nf6 c4 e6 Nc3 Bb4 e3': 'Nimzo-Indian Defense: Rubinstein Variation',
-    'd4 Nf6 c4 e6 Nc3 Bb4 e3 O-O': 'Nimzo-Indian Defense: Rubinstein Variation',
     'd4 Nf6 c4 e6 Nc3 Bb4 Bg5': 'Nimzo-Indian Defense: Leningrad Variation',
-    'd4 Nf6 c4 e6 Nc3 Bb4 Nf3': 'Nimzo-Indian Defense: Kasparov Variation',
     'd4 Nf6 c4 e6 Nc3 Bb4 a3': 'Nimzo-Indian Defense: Sämisch Variation',
-    'd4 Nf6 c4 e6 Nc3 Bb4 f3': 'Nimzo-Indian Defense: Sämisch Variation',
-    'd4 Nf6 c4 e6 Nf3': 'Queen\'s Indian Defense',
     'd4 Nf6 c4 e6 Nf3 b6': 'Queen\'s Indian Defense',
     'd4 Nf6 c4 e6 Nf3 b6 g3': 'Queen\'s Indian Defense: Fianchetto Variation',
-    'd4 Nf6 c4 e6 Nf3 b6 Nc3': 'Queen\'s Indian Defense',
     'd4 Nf6 c4 e6 Nf3 Bb4+': 'Bogo-Indian Defense',
-    'd4 Nf6 c4 e6 Nf3 Bb4+ Bd2': 'Bogo-Indian Defense',
-    'd4 Nf6 c4 e6 Nf3 Bb4+ Nbd2': 'Bogo-Indian Defense',
     'd4 Nf6 c4 g6': 'King\'s Indian Defense',
-    'd4 Nf6 c4 g6 Nc3': 'King\'s Indian Defense',
-    'd4 Nf6 c4 g6 Nc3 Bg7': 'King\'s Indian Defense',
     'd4 Nf6 c4 g6 Nc3 Bg7 e4': 'King\'s Indian Defense: Classical Variation',
-    'd4 Nf6 c4 g6 Nc3 Bg7 e4 d6': 'King\'s Indian Defense: Classical Variation',
-    'd4 Nf6 c4 g6 Nc3 Bg7 e4 d6 Nf3': 'King\'s Indian Defense: Classical Variation',
-    'd4 Nf6 c4 g6 Nc3 Bg7 e4 d6 Nf3 O-O': 'King\'s Indian Defense: Classical Variation',
-    'd4 Nf6 c4 g6 Nc3 Bg7 e4 d6 Nf3 O-O Be2': 'King\'s Indian Defense: Classical Variation',
     'd4 Nf6 c4 g6 Nc3 Bg7 e4 d6 f3': 'King\'s Indian Defense: Sämisch Variation',
-    'd4 Nf6 c4 g6 Nc3 Bg7 Nf3': 'King\'s Indian Defense',
-    'd4 Nf6 c4 g6 Nc3 Bg7 Nf3 O-O': 'King\'s Indian Defense',
-    'd4 Nf6 c4 g6 Nc3 Bg7 Nf3 d6': 'King\'s Indian Defense',
     'd4 Nf6 c4 g6 g3': 'King\'s Indian Defense: Fianchetto Variation',
-    'd4 Nf6 c4 g6 g3 Bg7': 'King\'s Indian Defense: Fianchetto Variation',
-    'd4 Nf6 c4 g6 g3 Bg7 Bg2': 'King\'s Indian Defense: Fianchetto Variation',
     'd4 Nf6 c4 c5': 'Benoni Defense',
     'd4 Nf6 c4 c5 d5': 'Benoni Defense: Modern Benoni',
-    'd4 Nf6 c4 c5 d5 e6': 'Benoni Defense: Modern Benoni',
-    'd4 Nf6 c4 c5 d5 e6 Nc3': 'Benoni Defense: Modern Benoni',
-    'd4 Nf6 c4 c5 d5 e6 Nc3 exd5': 'Benoni Defense: Modern Benoni',
-    'd4 Nf6 c4 c5 d5 e6 Nc3 exd5 cxd5': 'Benoni Defense: Modern Benoni',
-    'd4 Nf6 c4 c5 d5 e6 Nc3 exd5 cxd5 d6': 'Benoni Defense: Modern Benoni',
     'd4 Nf6 c4 e5': 'Budapest Gambit',
-    'd4 Nf6 c4 e5 dxe5': 'Budapest Gambit',
-    'd4 Nf6 c4 e5 dxe5 Ng4': 'Budapest Gambit',
-    'd4 Nf6 Nf3': 'Indian Defense',
-    'd4 Nf6 Nf3 e6': 'Indian Defense',
-    'd4 Nf6 Nf3 e6 c4': 'Indian Defense',
-    'd4 Nf6 Nf3 g6': 'King\'s Indian Defense',
-    'd4 Nf6 Nf3 g6 c4': 'King\'s Indian Defense',
-    'd4 Nf6 Nf3 g6 g3': 'King\'s Indian Defense: Fianchetto Variation',
-    'd4 Nf6 Nf3 c5': 'Benoni Defense',
     'd4 Nf6 Bg5': 'Trompowsky Attack',
-    'd4 Nf6 Bg5 Ne4': 'Trompowsky Attack',
-    'd4 Nf6 Bg5 e6': 'Trompowsky Attack',
-    'd4 Nf6 Bg5 d5': 'Trompowsky Attack',
 
     // Dutch Defense
     'd4 f5': 'Dutch Defense',
-    'd4 f5 c4': 'Dutch Defense',
-    'd4 f5 c4 Nf6': 'Dutch Defense',
-    'd4 f5 c4 Nf6 g3': 'Dutch Defense',
-    'd4 f5 c4 e6': 'Dutch Defense',
     'd4 f5 g3': 'Dutch Defense: Leningrad Variation',
-    'd4 f5 g3 Nf6': 'Dutch Defense: Leningrad Variation',
-    'd4 f5 g3 Nf6 Bg2': 'Dutch Defense: Leningrad Variation',
-    'd4 f5 Nf3': 'Dutch Defense',
 
     // English Opening
     'c4': 'English Opening',
     'c4 e5': 'English Opening: Reversed Sicilian',
-    'c4 e5 Nc3': 'English Opening: Reversed Sicilian',
-    'c4 e5 Nc3 Nf6': 'English Opening: Reversed Sicilian',
-    'c4 e5 Nc3 Nc6': 'English Opening: Reversed Sicilian',
     'c4 e5 g3': 'English Opening: King\'s English Variation',
-    'c4 Nf6': 'English Opening',
-    'c4 Nf6 Nc3': 'English Opening',
-    'c4 Nf6 Nc3 e6': 'English Opening',
-    'c4 Nf6 Nc3 g6': 'English Opening',
-    'c4 Nf6 g3': 'English Opening',
     'c4 c5': 'English Opening: Symmetrical Variation',
-    'c4 c5 Nc3': 'English Opening: Symmetrical Variation',
-    'c4 c5 Nf3': 'English Opening: Symmetrical Variation',
-    'c4 c5 g3': 'English Opening: Symmetrical Variation',
-    'c4 e6': 'English Opening',
-    'c4 e6 Nc3': 'English Opening',
-    'c4 e6 Nf3': 'English Opening',
-    'c4 g6': 'English Opening: King\'s English Variation',
-    'c4 c6': 'English Opening',
 
     // Reti Opening
     'Nf3': 'Reti Opening',
-    'Nf3 d5': 'Reti Opening',
     'Nf3 d5 c4': 'Reti Opening',
-    'Nf3 d5 c4 d4': 'Reti Opening',
-    'Nf3 d5 c4 e6': 'Reti Opening',
-    'Nf3 d5 c4 c6': 'Reti Opening',
     'Nf3 d5 g3': 'Reti Opening: King\'s Indian Attack',
-    'Nf3 Nf6': 'Reti Opening',
-    'Nf3 Nf6 c4': 'Reti Opening',
-    'Nf3 Nf6 g3': 'Reti Opening',
-    'Nf3 c5': 'Reti Opening',
-    'Nf3 c5 c4': 'English Opening: Symmetrical Variation',
     'Nf3 g6': 'King\'s Indian Attack',
 
     // Bird's Opening
     'f4': 'Bird\'s Opening',
-    'f4 d5': 'Bird\'s Opening',
-    'f4 Nf6': 'Bird\'s Opening',
     'f4 e5': 'Bird\'s Opening: From\'s Gambit',
 
     // Other
     'e3': 'Van\'t Kruijs Opening',
     'b3': 'Nimzowitsch-Larsen Attack',
-    'b3 e5': 'Nimzowitsch-Larsen Attack',
-    'b3 d5': 'Nimzowitsch-Larsen Attack',
-    'b3 Nf6': 'Nimzowitsch-Larsen Attack',
     'g3': 'King\'s Fianchetto Opening',
-    'g3 e5': 'King\'s Fianchetto Opening',
-    'g3 d5': 'King\'s Fianchetto Opening',
     'Nc3': 'Dunst Opening',
-    'Nc3 d5': 'Dunst Opening',
-    'Nc3 e5': 'Dunst Opening',
     'd4 d6': 'Old Indian Defense',
-    'd4 d6 c4': 'Old Indian Defense',
-    'd4 d6 c4 Nf6': 'Old Indian Defense',
-    'd4 d6 Nf3': 'Old Indian Defense',
-    'd4 c6': 'Slav Defense',
     'e4 g6': 'Modern Defense',
-    'e4 g6 d4': 'Modern Defense',
-    'e4 g6 d4 Bg7': 'Modern Defense',
     'e4 b6': 'Owen\'s Defense',
     'e4 Nc6': 'Nimzowitsch Defense',
-    'e4 Nc6 d4': 'Nimzowitsch Defense',
     'e4 a6': 'St. George Defense',
     'e4 g5': 'Borg Defense',
-    'd4 g6': 'Grünfeld Defense',
-    'd4 Nf6 c4 g6 Nc3 d5': 'Grünfeld Defense',
-    'd4 Nf6 Nf3 d5': 'Queen\'s Pawn Game',
-    'd4 Nf6 c4 d6': 'Old Indian Defense'
+    'd4 Nf6 c4 g6 Nc3 d5': 'Grünfeld Defense'
 };
+
+// Initialize openings from migration and pre-population
+openings = migrateOpenings();
+openings = prePopulateOpenings();
 
 // Function to detect opening from moves
 function detectOpening(moves) {
@@ -670,8 +586,196 @@ function updateMoveHistory() {
     const movesToSave = currentMoveIndex === -1 ? [] : moveHistory.slice(0, currentMoveIndex + 1);
     document.getElementById('opening-moves').value = movesToSave.join(' ');
 
+    // Highlight matching opening in the list
+    highlightMatchingOpening();
+
+    // Check if moves extend an existing variation and show options
+    showExtendVariationOptions();
+
+    // Show/hide Quick Add button based on current state
+    updateQuickAddButton();
+
     // Refresh parent detection if in variation mode
     refreshParentDetection();
+}
+
+// Show or hide the Quick Add button based on whether we're in update mode with new moves
+function updateQuickAddButton() {
+    const quickAddBtn = document.getElementById('quick-add');
+    const saveType = document.querySelector('input[name="save-type"]:checked');
+
+    // Only show in update mode when there are new moves
+    if (saveType && saveType.value === 'update' && loadedOpening) {
+        const currentMoves = currentMoveIndex === -1 ? [] : moveHistory.slice(0, currentMoveIndex + 1);
+        if (currentMoves.length > loadedOpening.opening.moves.length) {
+            const newMoves = currentMoves.slice(loadedOpening.opening.moves.length);
+            quickAddBtn.style.display = 'inline-block';
+            quickAddBtn.title = `Quick add: ${newMoves.join(' ')}`;
+        } else {
+            quickAddBtn.style.display = 'none';
+        }
+    } else {
+        quickAddBtn.style.display = 'none';
+    }
+}
+
+// Highlight the opening/variation that matches the current board position
+function highlightMatchingOpening() {
+    // Remove all existing highlights
+    document.querySelectorAll('.opening-header.highlighted, .variation-header.highlighted').forEach(el => {
+        el.classList.remove('highlighted');
+    });
+
+    // Find the matching opening
+    const match = findMatchingOpening();
+    if (match) {
+        // Build the ID from the match info
+        const uniqueId = `opening-${match.mainOpeningIndex}-${match.path.join('-')}`;
+        const element = document.getElementById(uniqueId);
+
+        if (element) {
+            element.classList.add('highlighted');
+
+            // Auto-expand parent variations to make the highlighted item visible
+            expandParentVariations(match.mainOpeningIndex, match.path);
+        }
+    }
+}
+
+// Expand all parent variations to make a specific opening visible
+function expandParentVariations(mainOpeningIndex, path) {
+    // Start from the top level and expand each nested level
+    for (let i = 0; i <= path.length; i++) {
+        const currentPath = path.slice(0, i);
+        const parentId = `opening-${mainOpeningIndex}-${currentPath.join('-')}`;
+        const parentElement = document.getElementById(parentId);
+
+        if (parentElement) {
+            // Find the expand icon
+            const expandIcon = parentElement.querySelector('.expand-icon');
+            if (expandIcon) {
+                const targetId = expandIcon.dataset.targetId;
+                const variationsList = document.getElementById(targetId);
+
+                // Expand if currently collapsed
+                if (variationsList && variationsList.style.display === 'none') {
+                    variationsList.style.display = 'block';
+                    expandIcon.textContent = '▼';
+                }
+            }
+        }
+    }
+}
+
+// Show options to extend an existing variation or create a new sub-variation
+function showExtendVariationOptions() {
+    // Remove existing extend options
+    const existingOptions = document.getElementById('extend-variation-options');
+    if (existingOptions) existingOptions.remove();
+
+    // Don't show options if user is already in variation or update mode
+    const saveType = document.querySelector('input[name="save-type"]:checked');
+    if (saveType && (saveType.value === 'variation' || saveType.value === 'update')) {
+        return;
+    }
+
+    const currentMoves = currentMoveIndex === -1 ? [] : moveHistory.slice(0, currentMoveIndex + 1);
+
+    if (currentMoves.length === 0) {
+        return;
+    }
+
+    // Find the best matching opening (longest prefix)
+    const match = findMatchingOpening();
+
+    if (match && currentMoves.length > match.matchLength) {
+        // We have moves that extend beyond the matched opening
+        const extraMoves = currentMoves.slice(match.matchLength);
+
+        // Create the extend options UI
+        const optionsDiv = document.createElement('div');
+        optionsDiv.id = 'extend-variation-options';
+        optionsDiv.className = 'extend-options';
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'extend-message';
+        messageDiv.innerHTML = `
+            <strong style="color: #2196F3;">✓ Found matching ${match.isMainOpening ? 'opening' : 'variation'}:</strong> "${match.opening.name}"<br>
+            <span style="color: #b5bac1;">New moves to add: ${extraMoves.join(' ')}</span>
+        `;
+
+        const buttonsDiv = document.createElement('div');
+        buttonsDiv.className = 'extend-buttons';
+
+        // Only show extend button for user-created openings (not database ones)
+        if (match.opening.isFromDatabase !== true) {
+            // Button to extend the existing variation
+            const extendBtn = document.createElement('button');
+            extendBtn.textContent = `Extend "${match.opening.name}"`;
+            extendBtn.className = 'extend-btn';
+            extendBtn.onclick = async () => {
+                await extendExistingVariation(match, currentMoves);
+            };
+            buttonsDiv.appendChild(extendBtn);
+        }
+
+        // Button to create new sub-variation (switches to variation mode)
+        const newSubBtn = document.createElement('button');
+        newSubBtn.textContent = match.opening.isFromDatabase === true ? 'Create Sub-Variation' : 'Create New Sub-Variation';
+        newSubBtn.className = 'new-sub-btn';
+        newSubBtn.onclick = () => {
+            // Switch to variation mode
+            document.querySelector('input[name="save-type"][value="variation"]').checked = true;
+            document.getElementById('variation-section').style.display = 'block';
+
+            // Pre-select the parent
+            const detected = detectParentOpening();
+            if (detected) {
+                populateParentSelect(detected);
+                const mainOpening = openings[detected.mainOpeningIndex];
+                document.getElementById('opening-name').value = mainOpening.name;
+            }
+
+            // Focus on variation name field
+            document.getElementById('variation-name').focus();
+        };
+
+        buttonsDiv.appendChild(newSubBtn);
+
+        optionsDiv.appendChild(messageDiv);
+        optionsDiv.appendChild(buttonsDiv);
+
+        // Insert before the save section
+        const saveSection = document.querySelector('.save-section');
+        saveSection.parentNode.insertBefore(optionsDiv, saveSection);
+    }
+}
+
+// Extend an existing opening/variation with new moves
+async function extendExistingVariation(match, newMoves) {
+    const confirmed = await showConfirm(
+        `Extend "${match.opening.name}" from ${match.opening.moves.length} to ${newMoves.length} moves?\n\nThis will update the existing ${match.isMainOpening ? 'opening' : 'variation'}.`
+    );
+
+    if (!confirmed) return;
+
+    // Navigate to the opening/variation and update its moves
+    let targetOpening = openings[match.mainOpeningIndex];
+    for (let i = 0; i < match.path.length; i++) {
+        targetOpening = targetOpening.variations[match.path[i]];
+    }
+
+    // Update the moves
+    targetOpening.moves = [...newMoves];
+
+    // Save to localStorage
+    localStorage.setItem('openings', JSON.stringify(openings));
+
+    // Refresh the display and highlight
+    displayOpenings();
+    highlightMatchingOpening();
+
+    await showAlert(`Successfully extended "${match.opening.name}" to ${newMoves.length} moves!`);
 }
 
 // Navigate to a specific move in history
@@ -757,9 +861,36 @@ document.querySelectorAll('input[name="save-type"]').forEach(radio => {
         const variationSection = document.getElementById('variation-section');
         const openingNameField = document.getElementById('opening-name');
 
-        if (e.target.value === 'variation') {
+        // Hide extend options when manually switching modes
+        const extendOptions = document.getElementById('extend-variation-options');
+        if (extendOptions) extendOptions.remove();
+
+        if (e.target.value === 'update') {
+            // Update mode - keep name read-only
+            variationSection.style.display = 'none';
+            openingNameField.readOnly = true;
+
+            // Update button text
+            const saveButton = document.getElementById('save-opening');
+            saveButton.textContent = 'Update Variation';
+
+            // Show/hide Quick Add button
+            updateQuickAddButton();
+
+            // Clear detection message
+            const existing = document.getElementById('detection-message');
+            if (existing) existing.remove();
+        } else if (e.target.value === 'variation') {
             variationSection.style.display = 'block';
             openingNameField.placeholder = 'Parent Opening Name (auto-detected)';
+            openingNameField.readOnly = false; // Make name editable
+
+            // Reset button text
+            const saveButton = document.getElementById('save-opening');
+            saveButton.textContent = 'Save Opening';
+
+            // Hide Quick Add button
+            document.getElementById('quick-add').style.display = 'none';
 
             // Auto-detect parent opening
             const detected = detectParentOpening();
@@ -805,8 +936,17 @@ document.querySelectorAll('input[name="save-type"]').forEach(radio => {
                 variationSection.parentNode.insertBefore(detectionMsg, variationSection);
             }
         } else {
+            // Main opening mode
             variationSection.style.display = 'none';
             openingNameField.placeholder = 'Opening Name (auto-detected or enter custom name)';
+            openingNameField.readOnly = false; // Make name editable
+
+            // Reset button text
+            const saveButton = document.getElementById('save-opening');
+            saveButton.textContent = 'Save Opening';
+
+            // Hide Quick Add button
+            document.getElementById('quick-add').style.display = 'none';
 
             // Remove detection message when switching back to main opening
             const existing = document.getElementById('detection-message');
@@ -830,6 +970,57 @@ function detectParentOpening() {
     // Recursive function to search through opening and all its variations
     function searchOpening(opening, openingIndex, path = []) {
         // Check if current moves start with this opening's moves
+        if (opening.moves.length <= currentMoves.length && opening.moves.length > longestMatchLength) {
+            let matches = true;
+            for (let i = 0; i < opening.moves.length; i++) {
+                if (opening.moves[i] !== currentMoves[i]) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches) {
+                bestMatch = {
+                    opening,
+                    matchLength: opening.moves.length,
+                    path: [...path],
+                    isMainOpening: path.length === 0,
+                    mainOpeningIndex: openingIndex
+                };
+                longestMatchLength = opening.moves.length;
+            }
+        }
+
+        // Search through variations recursively
+        if (opening.variations && opening.variations.length > 0) {
+            opening.variations.forEach((variation, varIndex) => {
+                searchOpening(variation, openingIndex, [...path, varIndex]);
+            });
+        }
+    }
+
+    // Search all main openings and their variations
+    openings.forEach((opening, index) => {
+        searchOpening(opening, index);
+    });
+
+    return bestMatch;
+}
+
+// Find exact matching opening/variation for current board position
+function findMatchingOpening() {
+    const currentMoves = currentMoveIndex === -1 ? [] : moveHistory.slice(0, currentMoveIndex + 1);
+
+    if (currentMoves.length === 0) {
+        return null;
+    }
+
+    let bestMatch = null;
+    let longestMatchLength = 0;
+
+    // Recursive function to search through opening and all its variations
+    function searchOpening(opening, openingIndex, path = []) {
+        // Check if current moves match this opening's moves (either exact or prefix)
         if (opening.moves.length <= currentMoves.length && opening.moves.length > longestMatchLength) {
             let matches = true;
             for (let i = 0; i < opening.moves.length; i++) {
@@ -928,11 +1119,51 @@ document.getElementById('save-opening').addEventListener('click', async () => {
             return;
         }
 
-        openings.push({ name, moves, variations: [] });
+        openings.push({ name, moves, variations: [], isFromDatabase: false });
         localStorage.setItem('openings', JSON.stringify(openings));
         displayOpenings();
         populateParentSelect();
         await showAlert('Opening saved successfully!');
+    } else if (saveType === 'update') {
+        // Update existing opening/variation
+        if (!loadedOpening) {
+            await showAlert('No opening loaded to update. Please load an opening first.');
+            return;
+        }
+
+        // Check if trying to update a database opening
+        if (loadedOpening.opening.isFromDatabase === true) {
+            await showAlert('Cannot update database openings. Please create a variation instead.');
+            return;
+        }
+
+        const confirmed = await showConfirm(
+            `Update "${loadedOpening.opening.name}" from ${loadedOpening.opening.moves.length} to ${moves.length} moves?\n\nThis will update the existing ${loadedOpening.isMainOpening ? 'opening' : 'variation'}.`
+        );
+
+        if (!confirmed) return;
+
+        // Navigate to the opening/variation and update its moves
+        let targetOpening = openings[loadedOpening.mainOpeningIndex];
+        for (let i = 0; i < loadedOpening.path.length; i++) {
+            targetOpening = targetOpening.variations[loadedOpening.path[i]];
+        }
+
+        // Update the moves
+        targetOpening.moves = [...moves];
+
+        // Update the loadedOpening reference to keep it in sync
+        loadedOpening.opening = targetOpening;
+
+        // Save to localStorage
+        localStorage.setItem('openings', JSON.stringify(openings));
+
+        // Refresh the display and highlight
+        displayOpenings();
+        highlightMatchingOpening();
+        updateQuickAddButton(); // Hide Quick Add button since no new moves now
+
+        await showAlert(`Successfully updated "${loadedOpening.opening.name}" to ${moves.length} moves!`);
     } else {
         // Save as variation (or sub-variation)
         const variationName = document.getElementById('variation-name').value.trim();
@@ -979,11 +1210,11 @@ document.getElementById('save-opening').addEventListener('click', async () => {
             return;
         }
 
-        // Add the new variation to the parent
+        // Add the new variation to the parent (mark as user-added)
         if (!parentOpening.variations) {
             parentOpening.variations = [];
         }
-        parentOpening.variations.push({ name: variationName, moves, variations: [] });
+        parentOpening.variations.push({ name: variationName, moves, variations: [], isFromDatabase: false });
 
         localStorage.setItem('openings', JSON.stringify(openings));
         displayOpenings();
@@ -1014,7 +1245,9 @@ document.getElementById('reset-board').addEventListener('click', async () => {
     updateMoveHistory();
 
     // Clear input fields
-    document.getElementById('opening-name').value = '';
+    const openingNameField = document.getElementById('opening-name');
+    openingNameField.value = '';
+    openingNameField.readOnly = false;
     document.getElementById('variation-name').value = '';
     document.getElementById('opening-moves').value = '';
 
@@ -1022,9 +1255,75 @@ document.getElementById('reset-board').addEventListener('click', async () => {
     document.querySelector('input[name="save-type"][value="main"]').checked = true;
     document.getElementById('variation-section').style.display = 'none';
 
+    // Clear loaded opening and disable update mode
+    loadedOpening = null;
+    const updateRadio = document.querySelector('input[name="save-type"][value="update"]');
+    updateRadio.disabled = true;
+
+    // Hide Quick Add button
+    document.getElementById('quick-add').style.display = 'none';
+
     // Clear detection message
     const existing = document.getElementById('detection-message');
     if (existing) existing.remove();
+
+    // Clear extend options
+    const extendOptions = document.getElementById('extend-variation-options');
+    if (extendOptions) extendOptions.remove();
+});
+
+// Quick Add button handler
+document.getElementById('quick-add').addEventListener('click', async () => {
+    if (!loadedOpening) {
+        await showAlert('No opening loaded. Please load an opening first.');
+        return;
+    }
+
+    const currentMoves = currentMoveIndex === -1 ? [] : moveHistory.slice(0, currentMoveIndex + 1);
+
+    // Check if there are new moves beyond the loaded variation
+    if (currentMoves.length <= loadedOpening.opening.moves.length) {
+        await showAlert('No new moves to add. Please add moves beyond the current variation.');
+        return;
+    }
+
+    const newMoves = currentMoves.slice(loadedOpening.opening.moves.length);
+    const newMovesStr = newMoves.join(' ');
+
+    // Create auto-generated variation name
+    const variationName = `${loadedOpening.opening.name} (${newMovesStr})`;
+
+    const confirmed = await showConfirm(
+        `Create new sub-variation:\n"${variationName}"\n\nwith ${currentMoves.length} moves under "${loadedOpening.opening.name}"?`
+    );
+
+    if (!confirmed) return;
+
+    // Navigate to the loaded opening/variation
+    let parentOpening = openings[loadedOpening.mainOpeningIndex];
+    for (let i = 0; i < loadedOpening.path.length; i++) {
+        parentOpening = parentOpening.variations[loadedOpening.path[i]];
+    }
+
+    // Add the new variation to the parent
+    if (!parentOpening.variations) {
+        parentOpening.variations = [];
+    }
+    parentOpening.variations.push({
+        name: variationName,
+        moves: [...currentMoves],
+        variations: [],
+        isFromDatabase: false
+    });
+
+    // Save to localStorage
+    localStorage.setItem('openings', JSON.stringify(openings));
+
+    // Refresh the display
+    displayOpenings();
+    highlightMatchingOpening();
+
+    await showAlert(`Successfully created sub-variation:\n"${variationName}"!`);
 });
 
 // Counter for unique IDs
@@ -1055,6 +1354,18 @@ function createOpeningElement(item, mainOpeningIndex, path, isMainOpening) {
     const headerDiv = document.createElement('div');
     headerDiv.className = isMainOpening ? 'opening-header' : 'variation-header';
 
+    // Add unique ID based on path for highlighting
+    const uniqueId = `opening-${mainOpeningIndex}-${path.join('-')}`;
+    headerDiv.id = uniqueId;
+    headerDiv.setAttribute('data-main-index', mainOpeningIndex);
+    headerDiv.setAttribute('data-path', JSON.stringify(path));
+
+    // Add nesting level data attribute for CSS styling
+    if (!isMainOpening) {
+        const nestingLevel = path.length;
+        headerDiv.setAttribute('data-level', nestingLevel);
+    }
+
     // Expand/collapse icon (only if variations exist)
     const hasVariations = item.variations && item.variations.length > 0;
     if (hasVariations) {
@@ -1071,7 +1382,7 @@ function createOpeningElement(item, mainOpeningIndex, path, isMainOpening) {
         headerDiv.appendChild(spacer);
     }
 
-    // Opening/variation name
+    // Opening/variation name (clickable to load)
     const nameSpan = document.createElement('span');
     nameSpan.className = isMainOpening ? 'opening-name' : 'variation-name';
     nameSpan.textContent = `${item.name} (${item.moves.length} moves)`;
@@ -1079,54 +1390,54 @@ function createOpeningElement(item, mainOpeningIndex, path, isMainOpening) {
         const totalVariations = countAllVariations(item);
         nameSpan.textContent += ` - ${totalVariations} sub-variation${totalVariations > 1 ? 's' : ''}`;
     }
+    nameSpan.style.cursor = 'pointer';
+    nameSpan.onclick = (e) => {
+        e.stopPropagation();
+        loadOpening(item, mainOpeningIndex, path);
+    };
     headerDiv.appendChild(nameSpan);
 
-    // Button container
-    const buttonContainer = document.createElement('div');
-    buttonContainer.className = 'button-container';
+    // Delete trash icon (only for user-added openings/variations, not database ones)
+    if (item.isFromDatabase !== true) {
+        const deleteIcon = document.createElement('span');
+        deleteIcon.className = 'delete-icon';
+        deleteIcon.innerHTML = '🗑️';
+        deleteIcon.style.cursor = 'pointer';
+        deleteIcon.style.fontSize = '16px';
+        deleteIcon.style.marginLeft = '10px';
+        deleteIcon.title = 'Delete';
+        deleteIcon.onclick = async (e) => {
+            e.stopPropagation();
+            const totalVariations = item.variations ? countAllVariations(item) : 0;
+            const itemType = isMainOpening ? 'opening' : 'variation';
 
-    const loadBtn = document.createElement('button');
-    loadBtn.textContent = 'Load';
-    loadBtn.onclick = () => {
-        loadOpening(item);
-    };
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.className = 'delete-btn';
-    deleteBtn.onclick = async () => {
-        const totalVariations = item.variations ? countAllVariations(item) : 0;
-        const itemType = isMainOpening ? 'opening' : 'variation';
-
-        let confirmMsg;
-        if (totalVariations > 0) {
-            confirmMsg = `Are you sure you want to delete the ${itemType} "${item.name}" and all ${totalVariations} sub-variation(s)?\n\nThis action cannot be undone.`;
-        } else {
-            confirmMsg = `Are you sure you want to delete the ${itemType} "${item.name}"?\n\nThis action cannot be undone.`;
-        }
-
-        if (await showConfirm(confirmMsg)) {
-            if (isMainOpening) {
-                openings.splice(mainOpeningIndex, 1);
+            let confirmMsg;
+            if (totalVariations > 0) {
+                confirmMsg = `Are you sure you want to delete the ${itemType} "${item.name}" and all ${totalVariations} sub-variation(s)?\n\nThis action cannot be undone.`;
             } else {
-                // Navigate to parent and remove this variation
-                let parent = openings[mainOpeningIndex];
-                for (let i = 0; i < path.length - 1; i++) {
-                    parent = parent.variations[path[i]];
-                }
-                parent.variations.splice(path[path.length - 1], 1);
+                confirmMsg = `Are you sure you want to delete the ${itemType} "${item.name}"?\n\nThis action cannot be undone.`;
             }
-            localStorage.setItem('openings', JSON.stringify(openings));
-            displayOpenings();
-            populateParentSelect();
 
-            await showAlert(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} "${item.name}" has been deleted.`);
-        }
-    };
+            if (await showConfirm(confirmMsg)) {
+                if (isMainOpening) {
+                    openings.splice(mainOpeningIndex, 1);
+                } else {
+                    // Navigate to parent and remove this variation
+                    let parent = openings[mainOpeningIndex];
+                    for (let i = 0; i < path.length - 1; i++) {
+                        parent = parent.variations[path[i]];
+                    }
+                    parent.variations.splice(path[path.length - 1], 1);
+                }
+                localStorage.setItem('openings', JSON.stringify(openings));
+                displayOpenings();
+                populateParentSelect();
 
-    buttonContainer.appendChild(loadBtn);
-    buttonContainer.appendChild(deleteBtn);
-    headerDiv.appendChild(buttonContainer);
+                await showAlert(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} "${item.name}" has been deleted.`);
+            }
+        };
+        headerDiv.appendChild(deleteIcon);
+    }
 
     li.appendChild(headerDiv);
 
@@ -1175,7 +1486,7 @@ function toggleVariationsById(id) {
 }
 
 // Load opening onto board
-async function loadOpening(opening) {
+async function loadOpening(opening, mainOpeningIndex, path) {
     if (!game || !board) return;
 
     game.reset();
@@ -1194,16 +1505,91 @@ async function loadOpening(opening) {
 
     currentMoveIndex = moveHistory.length - 1;
     board.position(game.fen());
-    updateMoveHistory();
 
-    // Default to main opening mode when loading
-    document.querySelector('input[name="save-type"][value="main"]').checked = true;
+    // Track what was loaded for the Update Variation option
+    loadedOpening = {
+        opening: opening,
+        mainOpeningIndex: mainOpeningIndex,
+        path: path,
+        isMainOpening: path.length === 0
+    };
+
+    // Enable and switch to "Update Variation" mode
+    const updateRadio = document.querySelector('input[name="save-type"][value="update"]');
+    updateRadio.disabled = false;
+    updateRadio.checked = true;
+
     document.getElementById('variation-section').style.display = 'none';
     document.getElementById('opening-name').value = opening.name;
+    document.getElementById('opening-name').readOnly = true; // Make name read-only in update mode
+
+    // Update button text
+    document.getElementById('save-opening').textContent = 'Update Variation';
+
+    updateMoveHistory();
 
     // Clear detection message
     const existing = document.getElementById('detection-message');
     if (existing) existing.remove();
+
+    // Clear extend options
+    const extendOptions = document.getElementById('extend-variation-options');
+    if (extendOptions) extendOptions.remove();
+}
+
+// Resizer functionality
+function initResizer() {
+    const resizer = document.getElementById('resizer');
+    const leftPanel = document.getElementById('opening-builder');
+    const rightPanel = document.getElementById('opening-list');
+
+    let isResizing = false;
+    let startX = 0;
+    let startLeftWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startLeftWidth = leftPanel.getBoundingClientRect().width;
+
+        // Prevent text selection during resize
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'col-resize';
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+
+        const containerWidth = document.getElementById('app').getBoundingClientRect().width;
+        const resizerWidth = resizer.getBoundingClientRect().width;
+        const delta = e.clientX - startX;
+        const newLeftWidth = startLeftWidth + delta;
+
+        // Calculate percentages
+        const leftPercent = (newLeftWidth / containerWidth) * 100;
+        const rightPercent = 100 - leftPercent - ((resizerWidth / containerWidth) * 100);
+
+        // Enforce minimum widths (20% each side)
+        if (leftPercent >= 20 && rightPercent >= 20) {
+            leftPanel.style.flex = `0 0 ${leftPercent}%`;
+            rightPanel.style.flex = `0 0 ${rightPercent}%`;
+
+            // Resize the chess board
+            if (board) {
+                board.resize();
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+        }
+    });
 }
 
 // Initialize
@@ -1212,4 +1598,5 @@ window.onload = () => {
     displayOpenings();
     populateParentSelect();
     updateMoveHistory();
+    initResizer();
 };
