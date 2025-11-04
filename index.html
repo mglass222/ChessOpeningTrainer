@@ -9,12 +9,36 @@
 </head>
 <body>
     <h1>Chess Opening Trainer</h1>
+
     <div id="app">
         <div id="opening-builder" class="resizable-section">
             <h2>Create Opening</h2>
             <p>Move pieces on the board to create your opening. The program will automatically detect and name known openings! Tip: Save a main opening, then continue playing to add variations.</p>
             <div id="board"></div>
             <div id="move-history"></div>
+
+            <!-- Opening Info Section -->
+            <div id="opening-info" class="opening-info"></div>
+
+            <!-- Position Statistics -->
+            <div id="position-stats" class="position-stats" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h4 style="margin: 0;">Position Statistics</h4>
+                    <div class="database-toggle">
+                        <button id="db-toggle-masters" class="db-toggle-btn active">Masters</button>
+                        <button id="db-toggle-lichess" class="db-toggle-btn">Lichess</button>
+                    </div>
+                </div>
+                <div class="stats-loading" style="display: none;">Loading statistics...</div>
+                <div class="stats-content"></div>
+            </div>
+
+            <!-- Popular Moves -->
+            <div id="popular-moves" class="popular-moves" style="display: none;">
+                <h4>Popular Next Moves</h4>
+                <div class="moves-loading" style="display: none;">Loading moves...</div>
+                <div class="moves-content"></div>
+            </div>
 
             <div class="save-section">
                 <label>
@@ -49,8 +73,32 @@
         </div>
         <div id="resizer"></div>
         <div id="opening-list" class="resizable-section">
-            <h2>Opening Lines</h2>
-            <p>Select an opening to practice or manage your saved lines:</p>
+            <h2>Opening Library</h2>
+            <p>Browse 3,590+ openings from the Lichess database:</p>
+
+            <!-- Search/Filter -->
+            <div class="opening-search">
+                <input type="text" id="opening-search-input" placeholder="Search openings by name or ECO code...">
+                <div class="search-stats" id="search-stats">
+                    <span id="auto-filter-badge" class="auto-filter-badge" style="display: none;">
+                        Auto-filtered to current position
+                        <button id="clear-auto-filter" class="clear-filter-btn">✕ Show All</button>
+                    </span>
+                </div>
+            </div>
+
+            <!-- ECO Category Tabs -->
+            <div class="eco-categories">
+                <button class="eco-tab active" data-eco="ALL">All</button>
+                <button class="eco-tab" data-eco="A">A (Flank)</button>
+                <button class="eco-tab" data-eco="B">B (Semi-Open)</button>
+                <button class="eco-tab" data-eco="C">C (Open)</button>
+                <button class="eco-tab" data-eco="D">D (Closed)</button>
+                <button class="eco-tab" data-eco="E">E (Indian)</button>
+                <button class="eco-tab" data-eco="USER">My Openings</button>
+            </div>
+
+            <!-- Opening List -->
             <ul id="openings"></ul>
         </div>
     </div>
@@ -70,6 +118,11 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <!-- Configuration (load first!) -->
+    <script src="config.js"></script>
+    <!-- Lichess Opening Database & API -->
+    <script src="lichess-openings.js"></script>
+    <script src="lichess-api.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

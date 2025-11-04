@@ -1,8 +1,20 @@
-# macOS
+# Lichess API Token Configuration
+# DO NOT commit your personal API token!
+config.js
+
+# TSV source files (can be re-downloaded)
+*.tsv
+
+# Node modules (if using npm)
+node_modules/
+
+# OS files
 .DS_Store
+Thumbs.db
 
-# Grok cache
-.grok/
-
-# Backups
-Backups/
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
