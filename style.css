@@ -141,16 +141,13 @@ button:hover {
 
 #eval-bar-text {
     position: absolute;
+    bottom: 2px;
     left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 11px;
+    transform: translateX(-50%);
+    font-size: 10px;
     font-weight: bold;
     font-family: monospace;
-    color: #dbdee1;
-    text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
+    color: #000000;
     white-space: nowrap;
     z-index: 1;
     pointer-events: none;
