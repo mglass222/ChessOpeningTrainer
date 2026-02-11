@@ -109,10 +109,82 @@ button:hover {
     background-color: #45a049;
 }
 
+#board-wrapper {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: center;
+    gap: 4px;
+    margin: 20px auto;
+}
+
+#eval-bar {
+    width: 28px;
+    flex-shrink: 0;
+    background-color: #1a1a1a;
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #141517;
+}
+
+#eval-bar-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    background-color: #f0f0f0;
+    transition: height 0.5s ease-out;
+    border-radius: 0 0 3px 3px;
+}
+
+#eval-bar-text {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: bold;
+    font-family: monospace;
+    color: #dbdee1;
+    text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    white-space: nowrap;
+    z-index: 1;
+    pointer-events: none;
+}
+
+#depth-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 8px auto;
+}
+
+#depth-control label {
+    color: #b5bac1;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+#depth-slider {
+    width: 120px;
+    accent-color: #5d9fdb;
+    cursor: pointer;
+}
+
+#depth-value {
+    color: #5d9fdb;
+    font-weight: bold;
+}
+
 #board {
     width: 600px;
     max-width: 90vw;
-    margin: 20px auto;
+    margin: 0;
 }
 
 #move-history {

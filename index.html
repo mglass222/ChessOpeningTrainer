@@ -13,7 +13,17 @@
         <div id="opening-builder" class="resizable-section">
             <h2>Create Opening</h2>
             <p>Move pieces on the board to create your opening. The program will automatically detect and name known openings! Tip: Save a main opening, then continue playing to add variations.</p>
-            <div id="board"></div>
+            <div id="board-wrapper">
+                <div id="eval-bar">
+                    <div id="eval-bar-fill"></div>
+                    <div id="eval-bar-text">0.0</div>
+                </div>
+                <div id="board"></div>
+            </div>
+            <div id="depth-control">
+                <label for="depth-slider">Engine Depth: <span id="depth-value">15</span></label>
+                <input type="range" id="depth-slider" min="5" max="25" value="15">
+            </div>
             <div id="move-history"></div>
 
             <div class="save-section">

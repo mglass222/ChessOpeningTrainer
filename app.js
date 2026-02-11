@@ -222,6 +222,12 @@ let moveHistory = []; // Full move history for navigation
 let currentMoveIndex = -1; // Current position in move history (-1 = at start)
 let loadedOpening = null; // Track the currently loaded opening/variation for updates
 
+// Stockfish engine variables
+let stockfishWorker = null;
+let isEngineReady = false;
+let engineDepth = 15;
+let lastEvalFen = '';
+
 // Chess opening theory database
 const openingTheory = {
     // King's Pawn Openings
@@ -433,6 +439,130 @@ function initBoard() {
     board = ChessBoard('board', config);
 }
 
+// Initialize Stockfish engine
+function initStockfish() {
+    try {
+        const stockfishUrl = 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+        const blob = new Blob(
+            [`importScripts('${stockfishUrl}');`],
+            { type: 'application/javascript' }
+        );
+        const blobUrl = URL.createObjectURL(blob);
+        stockfishWorker = new Worker(blobUrl);
+        URL.revokeObjectURL(blobUrl);
+
+        stockfishWorker.addEventListener('message', onStockfishMessage);
+        stockfishWorker.postMessage('uci');
+    } catch (e) {
+        console.warn('Stockfish initialization failed:', e);
+        const evalBar = document.getElementById('eval-bar');
+        if (evalBar) evalBar.style.display = 'none';
+        const depthControl = document.getElementById('depth-control');
+        if (depthControl) depthControl.style.display = 'none';
+    }
+}
+
+// Handle Stockfish UCI messages
+function onStockfishMessage(event) {
+    const line = event.data;
+
+    if (line === 'uciok') {
+        isEngineReady = true;
+        stockfishWorker.postMessage('isready');
+        return;
+    }
+
+    if (line === 'readyok') {
+        evaluatePosition();
+        return;
+    }
+
+    if (line.startsWith('info') && line.includes(' score ')) {
+        parseEvalInfo(line);
+    }
+}
+
+// Trigger evaluation of current position
+function evaluatePosition() {
+    if (!stockfishWorker || !isEngineReady || !game) return;
+
+    const fen = game.fen();
+    if (fen === lastEvalFen) return;
+    lastEvalFen = fen;
+
+    stockfishWorker.postMessage('stop');
+    stockfishWorker.postMessage('position fen ' + fen);
+    stockfishWorker.postMessage('go depth ' + engineDepth);
+}
+
+// Parse UCI info lines for evaluation data
+function parseEvalInfo(line) {
+    const depthMatch = line.match(/\bdepth (\d+)/);
+    if (!depthMatch) return;
+
+    const depth = parseInt(depthMatch[1]);
+    let evalScore = null;
+    let isMate = false;
+
+    const cpMatch = line.match(/\bscore cp (-?\d+)/);
+    const mateMatch = line.match(/\bscore mate (-?\d+)/);
+
+    if (mateMatch) {
+        isMate = true;
+        evalScore = parseInt(mateMatch[1]);
+    } else if (cpMatch) {
+        evalScore = parseInt(cpMatch[1]);
+    }
+
+    if (evalScore === null) return;
+
+    // Stockfish reports from side-to-move perspective; convert to white's perspective
+    if (game.turn() === 'b') {
+        evalScore = -evalScore;
+    }
+
+    updateEvalBar(evalScore, isMate, depth);
+}
+
+// Update eval bar UI
+function updateEvalBar(score, isMate, depth) {
+    const fillEl = document.getElementById('eval-bar-fill');
+    const textEl = document.getElementById('eval-bar-text');
+    if (!fillEl || !textEl) return;
+
+    let fillPercent;
+    let displayText;
+
+    if (isMate) {
+        fillPercent = score > 0 ? 100 : 0;
+        displayText = (score > 0 ? '+' : '-') + 'M' + Math.abs(score);
+    } else {
+        fillPercent = cpToFillPercent(score);
+        const pawns = (score / 100).toFixed(1);
+        displayText = (score >= 0 ? '+' : '') + pawns;
+    }
+
+    fillEl.style.height = fillPercent + '%';
+    textEl.textContent = displayText;
+}
+
+// Convert centipawns to fill percentage using sigmoid
+function cpToFillPercent(cp) {
+    const k = 0.004;
+    const percent = 100 / (1 + Math.exp(-k * cp));
+    return Math.max(0.5, Math.min(99.5, percent));
+}
+
+// Sync eval bar height to match actual board height
+function syncEvalBarHeight() {
+    const boardElement = document.querySelector('#board > div');
+    const evalBar = document.getElementById('eval-bar');
+    if (!boardElement || !evalBar) return;
+
+    const boardHeight = boardElement.offsetHeight;
+    evalBar.style.height = boardHeight + 'px';
+}
+
 // Handle piece drop
 function onDrop(source, target) {
     // If we're in the middle of history, truncate future moves
@@ -597,6 +727,9 @@ function updateMoveHistory() {
 
     // Refresh parent detection if in variation mode
     refreshParentDetection();
+
+    // Evaluate position with Stockfish
+    evaluatePosition();
 }
 
 // Show or hide the Quick Add button based on whether we're in update mode with new moves
@@ -1241,6 +1374,7 @@ document.getElementById('reset-board').addEventListener('click', async () => {
     board.position('start');
     moveHistory = [];
     currentMoveIndex = -1;
+    lastEvalFen = '';
 
     updateMoveHistory();
 
@@ -1579,6 +1713,7 @@ function initResizer() {
             // Resize the chess board
             if (board) {
                 board.resize();
+                syncEvalBarHeight();
             }
         }
     });
@@ -1595,8 +1730,24 @@ function initResizer() {
 // Initialize
 window.onload = () => {
     initBoard();
+    initStockfish();
     displayOpenings();
     populateParentSelect();
     updateMoveHistory();
     initResizer();
+    setTimeout(syncEvalBarHeight, 100);
 };
+
+// Depth slider handler
+document.getElementById('depth-slider').addEventListener('input', (e) => {
+    engineDepth = parseInt(e.target.value);
+    document.getElementById('depth-value').textContent = engineDepth;
+    lastEvalFen = '';
+    evaluatePosition();
+});
+
+// Sync eval bar on window resize
+window.addEventListener('resize', () => {
+    if (board) board.resize();
+    syncEvalBarHeight();
+});
